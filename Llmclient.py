@@ -2,7 +2,7 @@ import os
 import json
 import re
 import logging
-from google import genai
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -35,21 +35,26 @@ def _extract_json(text: str) -> dict:
 
 
 def call_llm(context: str) -> dict:
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise EnvironmentError(
-            "GEMINI_API_KEY environment variable is not set. "
-            "Set it before running."
+            "OPENAI_API_KEY environment variable is not set. "
+            "Set it before running: set OPENAI_API_KEY=your-key"
         )
 
-    client = genai.Client(api_key=api_key)
-    full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\nOPERATIONAL DATA:\n{context}"
+    client = OpenAI(api_key=api_key)
+    full_prompt = f"OPERATIONAL DATA:\n{context}"
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=full_prompt,
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": full_prompt},
+        ],
+        temperature=0.2,
     )
 
-    raw_text = response.text
+    raw_text = response.choices[0].message.content
     logger.debug("Raw LLM response:\n%s", raw_text)
     return _extract_json(raw_text)
+    
