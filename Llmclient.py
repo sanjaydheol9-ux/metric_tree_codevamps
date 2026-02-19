@@ -45,7 +45,7 @@ def call_llm(context: str) -> dict:
     # Configure Gemini
     genai.configure(api_key=api_key)
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.0-pro")
 
     full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\nOPERATIONAL DATA:\n{context}"
 
