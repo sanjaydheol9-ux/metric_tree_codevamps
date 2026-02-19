@@ -4,7 +4,6 @@ import re
 import logging
 from google import genai
 
-
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
@@ -43,16 +42,14 @@ def call_llm(context: str) -> dict:
             "Set it before running."
         )
 
-    # Configure Gemini
-    genai.configure(api_key=api_key)
-
-    model = genai.GenerativeModel("gemini-1.0-pro")
-
+    client = genai.Client(api_key=api_key)
     full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\nOPERATIONAL DATA:\n{context}"
 
-    response = model.generate_content(full_prompt)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=full_prompt,
+    )
 
     raw_text = response.text
     logger.debug("Raw LLM response:\n%s", raw_text)
-
     return _extract_json(raw_text)
