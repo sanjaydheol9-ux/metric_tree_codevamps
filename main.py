@@ -2,6 +2,10 @@ from contextlib import asynccontextmanager
 from typing import Optional, List
 from database import engine, Base
 from models import *
+from database import engine, Base
+from models import *
+
+Base.metadata.create_all(bind=engine)
 
 Base.metadata.create_all(bind=engine)
 import logging
