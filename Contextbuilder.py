@@ -1,6 +1,3 @@
-from typing import Optional
-
-
 def _fmt(value, suffix: str = "") -> str:
     if value is None:
         return "N/A"
@@ -64,10 +61,10 @@ def build_context(
     if metric_tree:
         def _flatten_tree(node, depth=0):
             indent = "  " * depth
-            name = node.get("name") or node.get("metric") or str(node)
-            value = node.get("value") or node.get("current_value", "")
+            name   = node.get("name") or node.get("metric") or str(node)
+            value  = node.get("value") or node.get("current_value", "")
             status = node.get("status") or node.get("health") or ""
-            flag = " ⚠" if str(status).lower() in ("warning", "critical", "alert", "bad") else ""
+            flag   = " ⚠" if str(status).lower() in ("warning", "critical", "alert", "bad") else ""
             tree_lines.append(f"{indent}- {name}: {value}{flag}")
             for child in node.get("children", []):
                 _flatten_tree(child, depth + 1)
@@ -85,9 +82,9 @@ def build_context(
 
     rc_lines = []
     if root_cause:
-        primary = root_cause.get("primary_cause") or root_cause.get("root_cause") or root_cause.get("cause")
+        primary      = root_cause.get("primary_cause") or root_cause.get("root_cause") or root_cause.get("cause")
         contributing = root_cause.get("contributing_factors") or root_cause.get("factors") or []
-        details = root_cause.get("details") or root_cause.get("explanation") or root_cause.get("description")
+        details      = root_cause.get("details") or root_cause.get("explanation") or root_cause.get("description")
 
         if primary:
             rc_lines.append(f"  Primary Cause     : {primary}")
@@ -95,11 +92,14 @@ def build_context(
             rc_lines.append(f"  Details           : {details}")
         if contributing:
             rc_lines.append("  Contributing Factors:")
-            for f in (contributing if isinstance(contributing, list) else [contributing]):
-                rc_lines.append(f"    - {f}")
+            for factor in (contributing if isinstance(contributing, list) else [contributing]):
+                rc_lines.append(f"    - {factor}")
 
-        skip_keys = {"primary_cause", "root_cause", "cause", "contributing_factors",
-                     "factors", "details", "explanation", "description"}
+        skip_keys = {
+            "primary_cause", "root_cause", "cause",
+            "contributing_factors", "factors",
+            "details", "explanation", "description",
+        }
         for k, v in root_cause.items():
             if k not in skip_keys and v:
                 rc_lines.append(f"  {k}: {v}")
@@ -119,9 +119,9 @@ def build_context(
         if isinstance(items, list) and items:
             for a in items:
                 if isinstance(a, dict):
-                    metric = a.get("metric") or a.get("name") or "Unknown metric"
+                    metric   = a.get("metric") or a.get("name") or "Unknown metric"
                     severity = a.get("severity") or a.get("level") or ""
-                    desc = a.get("description") or a.get("details") or a.get("message") or ""
+                    desc     = a.get("description") or a.get("details") or a.get("message") or ""
                     anomaly_lines.append(f"  [{severity.upper() or 'ANOMALY'}] {metric}: {desc}")
                 else:
                     anomaly_lines.append(f"  - {a}")
