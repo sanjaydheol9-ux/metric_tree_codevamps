@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, Float
 from database import Base
 
 class WeeklyMetrics(Base):
-    __tablename__ = "weekly_metrics1"
+    __tablename__ = "weekly_metrics"
 
     id = Column(Integer, primary_key=True, index=True)
     week = Column(Integer, nullable=False)
