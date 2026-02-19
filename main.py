@@ -4,7 +4,8 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from ai.ai_service import generate_week_insights
+from AIservice import generate_week_insights
+
 
 logging.basicConfig(level=logging.INFO)
 
