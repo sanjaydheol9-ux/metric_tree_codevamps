@@ -1,12 +1,9 @@
+from contextlib import asynccontextmanager
 from typing import Optional, List
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
-from database import engine, Base, SessionLocal
-from models import WeeklyMetrics
 
 from metrics import calculate_week_metrics, metric_tree, compare_weeks
 from root_cause import root_cause_analysis
@@ -14,11 +11,28 @@ from simulation import simulate_load
 from model import detect_anomalies
 from Aiservice import generate_week_insights
 
-Base.metadata.create_all(bind=engine)
+
+# -----------------------
+# LOAD CSV
+# -----------------------
+
+class AppState:
+    df: Optional[pd.DataFrame] = None
+
+state = AppState()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    state.df = pd.read_csv("sample_Data.csv")
+    yield
+    state.df = None
+
 
 app = FastAPI(
     title="Supply Chain Intelligence API",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -28,8 +42,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # -----------------------
-# Request Models
+# MODELS
 # -----------------------
 
 class SimulateRequest(BaseModel):
@@ -45,27 +60,13 @@ class AIInsightsResponse(BaseModel):
 
 
 # -----------------------
-# Helper Functions
+# HELPERS
 # -----------------------
 
-def fetch_dataframe():
-    db: Session = SessionLocal()
-    records = db.query(WeeklyMetrics).all()
-    db.close()
-
-    if not records:
-        raise HTTPException(status_code=404, detail="No data found in database.")
-
-    df = pd.DataFrame([{
-        "week": r.week,
-        "delivery_score": r.delivery_score,
-        "accuracy_score": r.accuracy_score,
-        "dispatch_score": r.dispatch_score,
-        "warehouse_score": r.warehouse_score,
-        "on_time_score": r.on_time_score,
-    } for r in records])
-
-    return df
+def get_df():
+    if state.df is None:
+        raise HTTPException(status_code=503, detail="Data not loaded.")
+    return state.df
 
 
 def validate_week(week: int, df: pd.DataFrame):
@@ -74,51 +75,46 @@ def validate_week(week: int, df: pd.DataFrame):
 
 
 # -----------------------
-# System Routes
+# SYSTEM
 # -----------------------
 
 @app.get("/health")
 def health():
-    db: Session = SessionLocal()
-    records = db.query(WeeklyMetrics).all()
-    db.close()
-
-    weeks = list(set([r.week for r in records]))
-
+    df = get_df()
     return {
         "status": "ok",
-        "weeks_loaded": len(weeks),
-        "total_records": len(records)
+        "weeks_loaded": df["week"].nunique(),
+        "total_records": len(df)
     }
 
 
 @app.get("/weeks")
-def list_weeks():
-    df = fetch_dataframe()
+def weeks():
+    df = get_df()
     return {"weeks": sorted(df["week"].unique().tolist())}
 
 
 # -----------------------
-# Metrics
+# METRICS
 # -----------------------
 
 @app.get("/metrics/{week}")
-def get_metrics(week: int):
-    df = fetch_dataframe()
+def metrics(week: int):
+    df = get_df()
     validate_week(week, df)
     return calculate_week_metrics(week, df=df).to_dict()
 
 
 @app.get("/metrics/{week}/tree")
-def get_metric_tree(week: int):
-    df = fetch_dataframe()
+def tree(week: int):
+    df = get_df()
     validate_week(week, df)
     return metric_tree(week, df=df)
 
 
 @app.get("/metrics/compare")
-def compare_metrics(weeks: str = Query(...)):
-    df = fetch_dataframe()
+def compare(weeks: str = Query(...)):
+    df = get_df()
     week_list = [int(w.strip()) for w in weeks.split(",")]
 
     for w in week_list:
@@ -129,13 +125,12 @@ def compare_metrics(weeks: str = Query(...)):
 
 
 # -----------------------
-# Root Cause
+# ROOT CAUSE
 # -----------------------
 
 @app.get("/root-cause")
 def root_cause(current_week: int, previous_week: int):
-    df = fetch_dataframe()
-
+    df = get_df()
     validate_week(current_week, df)
     validate_week(previous_week, df)
 
@@ -154,12 +149,12 @@ def root_cause(current_week: int, previous_week: int):
 
 
 # -----------------------
-# Simulation
+# SIMULATION
 # -----------------------
 
 @app.post("/simulate/{week}")
 def simulate(week: int, body: SimulateRequest):
-    df = fetch_dataframe()
+    df = get_df()
     validate_week(week, df)
 
     result = simulate_load(week, body.order_increase_pct, df=df)
@@ -175,12 +170,12 @@ def simulate(week: int, body: SimulateRequest):
 
 
 # -----------------------
-# Anomalies
+# ANOMALIES
 # -----------------------
 
 @app.get("/anomalies")
 def anomalies(week: Optional[int] = None):
-    df = fetch_dataframe()
+    df = get_df()
 
     if week is not None:
         validate_week(week, df)
@@ -196,12 +191,12 @@ def anomalies(week: Optional[int] = None):
 
 
 # -----------------------
-# AI Insights
+# AI INSIGHTS
 # -----------------------
 
 @app.get("/ai/insights", response_model=AIInsightsResponse)
 def ai_insights(current_week: int, previous_week: int):
-    df = fetch_dataframe()
+    df = get_df()
 
     validate_week(current_week, df)
     validate_week(previous_week, df)
