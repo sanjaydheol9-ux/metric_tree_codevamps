@@ -1,2 +1,2 @@
 # metric_tree
-ecurekathon
+EUREKATHON3.0
