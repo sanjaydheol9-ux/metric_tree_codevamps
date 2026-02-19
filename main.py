@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 from typing import Optional, List
+from database import engine, Base
+from models import *
 
+Base.metadata.create_all(bind=engine)
 import logging
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
