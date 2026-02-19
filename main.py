@@ -51,7 +51,6 @@ def ai_insights(
         raise HTTPException(status_code=502, detail=result.get("summary"))
 
     return AIInsightsResponse(**result)
-=======
 from contextlib import asynccontextmanager
 from typing import Optional
 
