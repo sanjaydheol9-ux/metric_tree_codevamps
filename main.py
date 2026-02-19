@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List
 
+import logging
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +11,10 @@ from metrics import load_data, calculate_week_metrics, metric_tree, compare_week
 from root_cause import root_cause_analysis
 from simulation import simulate_load, stress_test
 from model import detect_anomalies, detect_anomalies_by_week
+from Aiservice import generate_week_insights
+
+
+logging.basicConfig(level=logging.INFO)
 
 
 class AppState:
@@ -28,8 +33,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Supply Chain Intelligence API",
-    description="Real-time delivery metrics, anomaly detection, root cause analysis, and load simulation.",
-    version="1.0.0",
+    description="AI-powered delivery intelligence, anomaly detection, root cause analysis and simulation.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -53,23 +58,32 @@ class HealthResponse(BaseModel):
     total_records: int
 
 
-def get_df() -> pd.DataFrame:
+class AIInsightsResponse(BaseModel):
+    status: str
+    summary: str
+    bottleneck: Optional[str] = None
+    root_cause: Optional[str] = None
+    recommendations: List[str]
+
+
+def _get_df() -> pd.DataFrame:
     if state.df is None:
         raise HTTPException(status_code=503, detail="Data not loaded.")
     return state.df
 
 
-def validate_week(week: int, df: pd.DataFrame):
+def _validate_week(week: int, df: pd.DataFrame) -> None:
     if week not in df["week"].values:
+        available = sorted(df["week"].unique().tolist())
         raise HTTPException(
             status_code=404,
-            detail=f"Week {week} not found. Available weeks: {sorted(df['week'].unique())}",
+            detail=f"Week {week} not found. Available weeks: {available}",
         )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 def health():
-    df = get_df()
+    df = _get_df()
     return HealthResponse(
         status="ok",
         weeks_loaded=df["week"].nunique(),
@@ -79,50 +93,41 @@ def health():
 
 @app.get("/weeks", tags=["System"])
 def list_weeks():
-    df = get_df()
-    return {"weeks": sorted(df["week"].unique())}
+    df = _get_df()
+    return {"weeks": sorted(df["week"].unique().tolist())}
 
 
 @app.get("/metrics/{week}", tags=["Metrics"])
 def get_metrics(week: int):
-    df = get_df()
-    validate_week(week, df)
+    df = _get_df()
+    _validate_week(week, df)
     return calculate_week_metrics(week, df=df).to_dict()
 
 
 @app.get("/metrics/{week}/tree", tags=["Metrics"])
 def get_metric_tree(week: int):
-    df = get_df()
-    validate_week(week, df)
+    df = _get_df()
+    _validate_week(week, df)
     return metric_tree(week, df=df)
 
 
 @app.get("/metrics/compare", tags=["Metrics"])
-def get_comparison(
-    weeks: str = Query(...)
-):
-    df = get_df()
-
-    try:
-        week_list = [int(w.strip()) for w in weeks.split(",")]
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Weeks must be comma-separated integers.")
+def get_comparison(weeks: str = Query(...)):
+    df = _get_df()
+    week_list = [int(w.strip()) for w in weeks.split(",")]
 
     for w in week_list:
-        validate_week(w, df)
+        _validate_week(w, df)
 
     result = compare_weeks(week_list, df=df)
     return result.reset_index().to_dict(orient="records")
 
 
 @app.get("/root-cause", tags=["Analysis"])
-def get_root_cause(
-    current_week: int = Query(...),
-    previous_week: int = Query(...),
-):
-    df = get_df()
-    validate_week(current_week, df)
-    validate_week(previous_week, df)
+def get_root_cause(current_week: int, previous_week: int):
+    df = _get_df()
+    _validate_week(current_week, df)
+    _validate_week(previous_week, df)
 
     report = root_cause_analysis(current_week, previous_week, df=df)
 
@@ -135,80 +140,31 @@ def get_root_cause(
         "total_drop": report.total_drop,
         "main_driver": report.main_driver,
         "verdict": report.verdict,
-        "drivers": [
-            {
-                "metric": d.metric,
-                "previous": d.previous,
-                "current": d.current,
-                "change": d.change,
-                "weight": d.weight,
-                "weighted_impact": d.weighted_impact,
-                "direction": d.direction,
-            }
-            for d in report.drivers
-        ],
     }
 
 
 @app.post("/simulate/{week}", tags=["Simulation"])
 def simulate(week: int, body: SimulateRequest):
-    df = get_df()
-    validate_week(week, df)
+    df = _get_df()
+    _validate_week(week, df)
 
-    result = simulate_load(
-        week,
-        body.order_increase_pct,
-        df=df,
-    )
-
-    baseline = calculate_week_metrics(week, df=df)
+    result = simulate_load(week, body.order_increase_pct, df=df)
 
     return {
         "week": week,
         "order_increase_pct": body.order_increase_pct,
-        "baseline_delivery": baseline.delivery_score,
+        "baseline_delivery": calculate_week_metrics(week, df=df).delivery_score,
         "simulated_delivery": result.delivery_score,
-        "simulated_picking": result.picking_score,
-        "simulated_dispatch": result.dispatch_score,
         "delivery_delta": result.delivery_delta,
         "risk_level": result.risk_level,
     }
 
 
-@app.post("/simulate/{week}/stress", tags=["Simulation"])
-def stress(
-    week: int,
-    step: float = Query(10.0),
-    max_increase: float = Query(100.0),
-):
-    df = get_df()
-    validate_week(week, df)
-
-    report = stress_test(week, step=step, max_increase=max_increase, df=df)
-
-    return {
-        "base_week": report.base_week,
-        "baseline_delivery": report.baseline_delivery,
-        "breaking_point_pct": report.breaking_point_pct,
-        "scenarios": [
-            {
-                "label": s.label,
-                "order_increase_pct": s.order_increase_pct,
-                "delivery_score": s.delivery_score,
-                "delivery_delta": s.delivery_delta,
-                "risk_level": s.risk_level,
-            }
-            for s in report.scenarios
-        ],
-    }
-
-
 @app.get("/anomalies", tags=["Anomalies"])
-def get_anomalies(week: Optional[int] = Query(None)):
-    df = get_df()
-
+def get_anomalies(week: Optional[int] = None):
+    df = _get_df()
     if week is not None:
-        validate_week(week, df)
+        _validate_week(week, df)
 
     report = detect_anomalies(df=df, week_filter=week)
 
@@ -217,34 +173,17 @@ def get_anomalies(week: Optional[int] = Query(None)):
         "anomaly_count": report.anomaly_count,
         "anomaly_rate": round(report.anomaly_rate, 4),
         "most_common_trigger": report.most_common_trigger,
-        "severity_breakdown": report.severity_breakdown,
-        "anomalies": [
-            {
-                "week": a.week,
-                "row_index": a.row_index,
-                "anomaly_score": a.anomaly_score,
-                "severity": a.severity,
-                "triggered_features": a.triggered_features,
-                "values": a.values,
-                "explanation": a.explanation,
-            }
-            for a in report.anomalies
-        ],
     }
 
 
-@app.get("/anomalies/by-week", tags=["Anomalies"])
-def get_anomalies_by_week():
-    df = get_df()
+@app.get("/ai/insights", response_model=AIInsightsResponse, tags=["AI"])
+def ai_insights(current_week: int, previous_week: int):
+    df = _get_df()
+    _validate_week(current_week, df)
+    _validate_week(previous_week, df)
 
-    reports = detect_anomalies_by_week(df=df)
+    if current_week == previous_week:
+        raise HTTPException(status_code=400, detail="Weeks must be different.")
 
-    return {
-        week: {
-            "anomaly_count": r.anomaly_count,
-            "anomaly_rate": round(r.anomaly_rate, 4),
-            "severity_breakdown": r.severity_breakdown,
-            "most_common_trigger": r.most_common_trigger,
-        }
-        for week, r in reports.items()
-    }
+    result = generate_week_insights(current_week, previous_week)
+    return AIInsightsResponse(**result)
