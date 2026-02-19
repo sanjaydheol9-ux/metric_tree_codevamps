@@ -1,5 +1,4 @@
 from typing import Optional, List
-import logging
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,8 +16,6 @@ from Aiservice import generate_week_insights
 
 Base.metadata.create_all(bind=engine)
 
-logging.basicConfig(level=logging.INFO)
-
 app = FastAPI(
     title="Supply Chain Intelligence API",
     version="2.0.0"
@@ -31,8 +28,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# -----------------------
+# Request Models
+# -----------------------
+
 class SimulateRequest(BaseModel):
     order_increase_pct: float
+
 
 class AIInsightsResponse(BaseModel):
     status: str
@@ -41,7 +43,12 @@ class AIInsightsResponse(BaseModel):
     root_cause: Optional[str] = None
     recommendations: List[str]
 
-def get_dataframe():
+
+# -----------------------
+# Helper Functions
+# -----------------------
+
+def fetch_dataframe():
     db: Session = SessionLocal()
     records = db.query(WeeklyMetrics).all()
     db.close()
@@ -49,7 +56,7 @@ def get_dataframe():
     if not records:
         raise HTTPException(status_code=404, detail="No data found in database.")
 
-    return pd.DataFrame([{
+    df = pd.DataFrame([{
         "week": r.week,
         "delivery_score": r.delivery_score,
         "accuracy_score": r.accuracy_score,
@@ -58,9 +65,17 @@ def get_dataframe():
         "on_time_score": r.on_time_score,
     } for r in records])
 
+    return df
+
+
 def validate_week(week: int, df: pd.DataFrame):
-    if week not in df["week"].values:
+    if week not in df["week"].unique():
         raise HTTPException(status_code=404, detail="Week not found.")
+
+
+# -----------------------
+# System Routes
+# -----------------------
 
 @app.get("/health")
 def health():
@@ -76,38 +91,56 @@ def health():
         "total_records": len(records)
     }
 
+
 @app.get("/weeks")
 def list_weeks():
-    df = get_dataframe()
+    df = fetch_dataframe()
     return {"weeks": sorted(df["week"].unique().tolist())}
+
+
+# -----------------------
+# Metrics
+# -----------------------
 
 @app.get("/metrics/{week}")
 def get_metrics(week: int):
-    df = get_dataframe()
+    df = fetch_dataframe()
     validate_week(week, df)
     return calculate_week_metrics(week, df=df).to_dict()
 
+
 @app.get("/metrics/{week}/tree")
 def get_metric_tree(week: int):
-    df = get_dataframe()
+    df = fetch_dataframe()
     validate_week(week, df)
     return metric_tree(week, df=df)
 
+
 @app.get("/metrics/compare")
-def get_comparison(weeks: str = Query(...)):
-    df = get_dataframe()
+def compare_metrics(weeks: str = Query(...)):
+    df = fetch_dataframe()
     week_list = [int(w.strip()) for w in weeks.split(",")]
+
     for w in week_list:
         validate_week(w, df)
+
     result = compare_weeks(week_list, df=df)
     return result.reset_index().to_dict(orient="records")
 
+
+# -----------------------
+# Root Cause
+# -----------------------
+
 @app.get("/root-cause")
-def get_root_cause(current_week: int, previous_week: int):
-    df = get_dataframe()
+def root_cause(current_week: int, previous_week: int):
+    df = fetch_dataframe()
+
     validate_week(current_week, df)
     validate_week(previous_week, df)
+
     report = root_cause_analysis(current_week, previous_week, df=df)
+
     return {
         "kpi": report.kpi,
         "current_week": report.current_week,
@@ -119,11 +152,18 @@ def get_root_cause(current_week: int, previous_week: int):
         "verdict": report.verdict,
     }
 
+
+# -----------------------
+# Simulation
+# -----------------------
+
 @app.post("/simulate/{week}")
 def simulate(week: int, body: SimulateRequest):
-    df = get_dataframe()
+    df = fetch_dataframe()
     validate_week(week, df)
+
     result = simulate_load(week, body.order_increase_pct, df=df)
+
     return {
         "week": week,
         "order_increase_pct": body.order_increase_pct,
@@ -133,12 +173,20 @@ def simulate(week: int, body: SimulateRequest):
         "risk_level": result.risk_level,
     }
 
+
+# -----------------------
+# Anomalies
+# -----------------------
+
 @app.get("/anomalies")
-def get_anomalies(week: Optional[int] = None):
-    df = get_dataframe()
+def anomalies(week: Optional[int] = None):
+    df = fetch_dataframe()
+
     if week is not None:
         validate_week(week, df)
+
     report = detect_anomalies(df=df, week_filter=week)
+
     return {
         "total_records": report.total_records,
         "anomaly_count": report.anomaly_count,
@@ -146,12 +194,21 @@ def get_anomalies(week: Optional[int] = None):
         "most_common_trigger": report.most_common_trigger,
     }
 
+
+# -----------------------
+# AI Insights
+# -----------------------
+
 @app.get("/ai/insights", response_model=AIInsightsResponse)
 def ai_insights(current_week: int, previous_week: int):
-    df = get_dataframe()
+    df = fetch_dataframe()
+
     validate_week(current_week, df)
     validate_week(previous_week, df)
+
     if current_week == previous_week:
         raise HTTPException(status_code=400, detail="Weeks must be different.")
+
     result = generate_week_insights(current_week, previous_week)
+
     return AIInsightsResponse(**result)
