@@ -35,22 +35,22 @@ def _extract_json(text: str) -> dict:
 
 
 def call_llm(context: str) -> dict:
-    api_key = os.getenv("XAI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise EnvironmentError(
-            "XAI_API_KEY environment variable is not set. "
-            "Set it before running: set XAI_API_KEY=your-key"
+            "GROQ_API_KEY environment variable is not set. "
+            "Set it before running: set GROQ_API_KEY=your-key"
         )
 
     client = OpenAI(
         api_key=api_key,
-        base_url="https://api.x.ai/v1",
+        base_url="https://api.groq.com/openai/v1",
     )
 
     full_prompt = f"OPERATIONAL DATA:\n{context}"
 
     response = client.chat.completions.create(
-        model="grok-3",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": full_prompt},
@@ -61,3 +61,4 @@ def call_llm(context: str) -> dict:
     raw_text = response.choices[0].message.content
     logger.debug("Raw LLM response:\n%s", raw_text)
     return _extract_json(raw_text)
+    
