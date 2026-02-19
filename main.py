@@ -1,28 +1,33 @@
 from contextlib import asynccontextmanager
 from typing import Optional, List
-from database import engine, Base
-from models import *
-from database import engine, Base
-from models import *
 
-Base.metadata.create_all(bind=engine)
-
-Base.metadata.create_all(bind=engine)
 import logging
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# 🔥 DATABASE
+from database import engine, Base
+from models import *
+
+# 🔥 CREATE TABLES
+Base.metadata.create_all(bind=engine)
+
+# 🔥 YOUR MODULES
 from metrics import load_data, calculate_week_metrics, metric_tree, compare_weeks
 from root_cause import root_cause_analysis
-from simulation import simulate_load, stress_test
-from model import detect_anomalies, detect_anomalies_by_week
+from simulation import simulate_load
+from model import detect_anomalies
 from Aiservice import generate_week_insights
 
 
 logging.basicConfig(level=logging.INFO)
 
+
+# ─────────────────────────────────────────
+# STATE MANAGEMENT
+# ─────────────────────────────────────────
 
 class AppState:
     df: Optional[pd.DataFrame] = None
@@ -37,6 +42,10 @@ async def lifespan(app: FastAPI):
     yield
     state.df = None
 
+
+# ─────────────────────────────────────────
+# APP INIT
+# ─────────────────────────────────────────
 
 app = FastAPI(
     title="Supply Chain Intelligence API",
@@ -53,10 +62,12 @@ app.add_middleware(
 )
 
 
+# ─────────────────────────────────────────
+# REQUEST MODELS
+# ─────────────────────────────────────────
+
 class SimulateRequest(BaseModel):
     order_increase_pct: float
-    picking_elasticity: float = 1.0
-    dispatch_elasticity: float = 1.2
 
 
 class HealthResponse(BaseModel):
@@ -73,20 +84,24 @@ class AIInsightsResponse(BaseModel):
     recommendations: List[str]
 
 
+# ─────────────────────────────────────────
+# INTERNAL HELPERS
+# ─────────────────────────────────────────
+
 def _get_df() -> pd.DataFrame:
     if state.df is None:
         raise HTTPException(status_code=503, detail="Data not loaded.")
     return state.df
 
 
-def _validate_week(week: int, df: pd.DataFrame) -> None:
+def _validate_week(week: int, df: pd.DataFrame):
     if week not in df["week"].values:
-        available = sorted(df["week"].unique().tolist())
-        raise HTTPException(
-            status_code=404,
-            detail=f"Week {week} not found. Available weeks: {available}",
-        )
+        raise HTTPException(status_code=404, detail="Week not found.")
 
+
+# ─────────────────────────────────────────
+# SYSTEM ROUTES
+# ─────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 def health():
@@ -103,6 +118,10 @@ def list_weeks():
     df = _get_df()
     return {"weeks": sorted(df["week"].unique().tolist())}
 
+
+# ─────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────
 
 @app.get("/metrics/{week}", tags=["Metrics"])
 def get_metrics(week: int):
@@ -130,6 +149,10 @@ def get_comparison(weeks: str = Query(...)):
     return result.reset_index().to_dict(orient="records")
 
 
+# ─────────────────────────────────────────
+# ROOT CAUSE
+# ─────────────────────────────────────────
+
 @app.get("/root-cause", tags=["Analysis"])
 def get_root_cause(current_week: int, previous_week: int):
     df = _get_df()
@@ -150,6 +173,10 @@ def get_root_cause(current_week: int, previous_week: int):
     }
 
 
+# ─────────────────────────────────────────
+# SIMULATION
+# ─────────────────────────────────────────
+
 @app.post("/simulate/{week}", tags=["Simulation"])
 def simulate(week: int, body: SimulateRequest):
     df = _get_df()
@@ -167,6 +194,10 @@ def simulate(week: int, body: SimulateRequest):
     }
 
 
+# ─────────────────────────────────────────
+# ANOMALIES
+# ─────────────────────────────────────────
+
 @app.get("/anomalies", tags=["Anomalies"])
 def get_anomalies(week: Optional[int] = None):
     df = _get_df()
@@ -182,6 +213,10 @@ def get_anomalies(week: Optional[int] = None):
         "most_common_trigger": report.most_common_trigger,
     }
 
+
+# ─────────────────────────────────────────
+# AI INSIGHTS
+# ─────────────────────────────────────────
 
 @app.get("/ai/insights", response_model=AIInsightsResponse, tags=["AI"])
 def ai_insights(current_week: int, previous_week: int):
