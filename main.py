@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from AIservice import generate_week_insights
+from Aiservice import generate_week_insights
 
 
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +34,10 @@ def ai_insights(
     previous_week: int = Query(..., ge=1),
 ):
     if current_week == previous_week:
-        raise HTTPException(status_code=400, detail="current_week and previous_week must be different.")
+        raise HTTPException(
+            status_code=400,
+            detail="current_week and previous_week must be different.",
+        )
 
     try:
         result = generate_week_insights(current_week, previous_week)
