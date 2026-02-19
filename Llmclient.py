@@ -2,7 +2,8 @@ import os
 import json
 import re
 import logging
-import google.generativeai as genai
+from google import genai
+
 
 logger = logging.getLogger(__name__)
 
