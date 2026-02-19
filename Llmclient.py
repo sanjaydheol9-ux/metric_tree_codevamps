@@ -2,7 +2,7 @@ import os
 import json
 import re
 import logging
-from google import genai
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +39,19 @@ def call_llm(context: str) -> dict:
     if not api_key:
         raise EnvironmentError(
             "GEMINI_API_KEY environment variable is not set. "
-            "Export it before running: export GEMINI_API_KEY=your-key"
+            "Set it before running."
         )
 
-    client = genai.Client(api_key=api_key)
+    # Configure Gemini
+    genai.configure(api_key=api_key)
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
     full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\nOPERATIONAL DATA:\n{context}"
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=full_prompt,
-    )
+    response = model.generate_content(full_prompt)
 
     raw_text = response.text
     logger.debug("Raw LLM response:\n%s", raw_text)
+
     return _extract_json(raw_text)
